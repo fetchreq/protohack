@@ -1,40 +1,45 @@
 /*
 Copyright © 2023 NAME HERE <EMAIL ADDRESS>
-
 */
 package cmd
 
 import (
 	"fmt"
+	"log/slog"
+	"net"
 
+	"github.com/rjprice04/protohack/server"
 	"github.com/spf13/cobra"
 )
 
 // p0Cmd represents the p0 command
 var p0Cmd = &cobra.Command{
 	Use:   "p0",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+	Short: "An echo server",
+	Long: `Starts and runs a TCP echo service`,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println("p0 called")
+		server.MakeTCPServer(echoServerHandler)
+	
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(p0Cmd)
+}
 
-	// Here you will define your flags and configuration settings.
 
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// p0Cmd.PersistentFlags().String("foo", "", "A help for foo")
+func echoServerHandler(conn net.Conn, logger *slog.Logger) {
+	defer conn.Close()
+	buffer := make([]byte, 1024)
+	for {
+		n, _ := conn.Read(buffer)
 
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// p0Cmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+		if n == 0 {
+			fmt.Println("Closing Connection")
+			break
+		}
+		conn.Write(buffer[0:n])
+	}
+
 }
