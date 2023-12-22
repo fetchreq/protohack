@@ -9,14 +9,14 @@ import (
 
 type fn func(conn net.Conn, logger *slog.Logger)
 
-func MakeTCPServer(handler fn) {
+func MakeTCPServer(title string, handler fn) {
 
 	// Set up logger	
 	jsonHandler := slog.NewJSONHandler(os.Stderr, nil)
 	myslog := slog.New(jsonHandler)
-	myslog.Info("message")
+	myslog.Info(fmt.Sprintf("Starting %s", title))
 
-	listener, err := net.Listen("tcp", "localhost:8080")
+	listener, err := net.Listen("tcp", "0.0.0.0:10000")
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return

@@ -4,6 +4,7 @@ Copyright © 2023 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -18,10 +19,11 @@ import (
 // p1Cmd represents the p1 command
 var p1Cmd = &cobra.Command{
 	Use:   "p1",
-	Short: "Protohackers Problem 2",
+	Short: "Protohackers Problem 1",
 	Long: ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		server.MakeTCPServer(primeTimeServerHandler)
+		
+		server.MakeTCPServer("Problem 1", primeTimeServerHandler)
 
 		jsonHandler := slog.NewJSONHandler(os.Stderr, nil)
 		myslog := slog.New(jsonHandler)
@@ -32,7 +34,10 @@ var p1Cmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(p1Cmd)
 }
-
+type Request struct {
+	Method string `json:"method"`
+	Number *float64 `json:"number"`
+}
 
 type PrimeTimeOutput struct {
 	Method string `json:"method"`
@@ -42,28 +47,17 @@ type PrimeTimeOutput struct {
 
 func primeTimeServerHandler(conn net.Conn, logger *slog.Logger) {
 	defer conn.Close()
-	buffer := make([]byte, 1024)
-	for {
-		n, _ := conn.Read(buffer)
+	scanner := bufio.NewScanner(conn)
+	for scanner.Scan() {
+		buffer := scanner.Bytes()
 
-		if n == 0 {
-			logger.Info("Disconnecting", "addr", conn.RemoteAddr())
-			break
-		}
 
-		if !json.Valid(buffer[0:n]) {
-			logger.Error("JSON input was invalid")
-			conn.Write([]byte(`{"method":"invalid"}`))
-			break
-		}
-		var input map[string]any
-		json.Unmarshal(buffer[0:n], &input)
+		logger.Info(fmt.Sprintf("body: %s", string(buffer)))
 
-		method, methodOk := input["method"].(string)
-		number, numberOk := input["number"].(float64)
+		var req Request
+		err := json.Unmarshal(buffer, &req)
 
-		if !methodOk || !numberOk || method != "isPrime" {
-			logger.Error(fmt.Sprintf("JSON input was invalid (method ok: %t, number ok: %t)", methodOk, numberOk))
+		if err !=nil || req.Method != "isPrime" || req.Number == nil {
 			conn.Write([]byte(`{"method":"invalid"}`))
 			break
 		}
@@ -71,15 +65,14 @@ func primeTimeServerHandler(conn net.Conn, logger *slog.Logger) {
 		var output PrimeTimeOutput
 		output.Method = "isPrime"
 		// Check if a float is actual an int i.e. 4.0 can be 4 but 4.5 is not a valid int
-		if number == float64(int(number)) {
-			output.Prime = big.NewInt(int64(number)).ProbablyPrime(0)
+		if *req.Number == float64(int(*req.Number)) {
+			output.Prime = big.NewInt(int64(*req.Number)).ProbablyPrime(0)
 		} else {
 			// floats are always false
 			output.Prime = false
 		}
 		outBuf, _ := json.Marshal(output)
 		
-		outBuf = append(outBuf, '\r')
 		outBuf = append(outBuf, '\n')
 		conn.Write(outBuf)
 

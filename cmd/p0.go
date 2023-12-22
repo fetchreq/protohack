@@ -18,8 +18,7 @@ var p0Cmd = &cobra.Command{
 	Short: "An echo server",
 	Long: `Starts and runs a TCP echo service`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("p0 called")
-		server.MakeTCPServer(echoServerHandler)
+		server.MakeTCPServer("Smoke Test", echoServerHandler)
 	
 	},
 }
