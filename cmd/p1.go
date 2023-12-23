@@ -6,7 +6,6 @@ package cmd
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"math/big"
 	"net"
@@ -47,8 +46,6 @@ func primeTimeServerHandler(conn net.Conn, logger *slog.Logger) {
 	for scanner.Scan() {
 		buffer := scanner.Bytes()
 
-
-		logger.Info(fmt.Sprintf("body: %s", string(buffer)))
 
 		var req Request
 		err := json.Unmarshal(buffer, &req)

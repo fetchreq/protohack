@@ -29,7 +29,6 @@ func MakeTCPServer(title string, handler fn) {
 			fmt.Println("Error: ", err)
 			continue
 		}
-		myslog.Info("New Connection", "addr", conn.RemoteAddr())
 		go handler(conn, myslog)
 	}
 }

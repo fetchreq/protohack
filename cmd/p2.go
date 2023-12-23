@@ -4,9 +4,9 @@ Copyright © 2023 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
-	"bufio"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 
@@ -25,10 +25,8 @@ Cobra is a CLI library for Go that empowers applications.
 This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("p2 called")
 		
-		//meansToAnEnd();
-		server.MakeTCPServer("Problem 2", primeTimeServerHandler)
+		server.MakeTCPServer("Problem 2", meansToAnEndHandler)
 	},
 }
 
@@ -38,33 +36,46 @@ func init() {
 
 func meansToAnEndHandler(conn net.Conn, logger *slog.Logger) {
 	defer conn.Close()
-	scanner := bufio.NewScanner(conn)
 	addr := conn.RemoteAddr()
 	logger.Info(fmt.Sprintf("New Connection to %s", addr))
-	for scanner.Scan() {
-		buffer := scanner.Bytes();
-
-		if len(buffer) != 9 {
-			continue
+	buf := make([]byte, 9)
+	clientAssests := make(map[int32]int32)	
+	for {
+		if _, err := io.ReadFull(conn, buf); err == io.EOF {
+			break
+		} else if err != nil {
+			break
 		}
+		
+		first := int32(binary.BigEndian.Uint32(buf[1:5]))
+		second := int32(binary.BigEndian.Uint32(buf[5:]))
 
-		mode := buffer[0]
-		if mode == 'I' {
-			// Insert
-			timestamp := binary.BigEndian.Uint32(buffer[1:5])
-			value := binary.BigEndian.Uint32(buffer[5:])
+		if buf[0] == 'I' {
+			clientAssests[first] = second
+			logger.Info(fmt.Sprintf("(%d)= %d\n", first, second))
+		} else if buf[0] == 'Q' {
+			var sum, count, avg int
+			for time, val := range clientAssests {
+				if first <= time && time <= second {
+					sum += int(val)
+					count++
+				}
+			}
 
-			fmt.Printf("Insert at %d with value %d", timestamp, value)
-		} else if mode == 'Q' {
-			minTime := binary.BigEndian.Uint32(buffer[1:5])
-			maxTime := binary.BigEndian.Uint32(buffer[5:])
+			if count > 0 {
+				avg = sum / count
+			}
 
-			fmt.Printf("Query between %d and %d", minTime, maxTime)
-
-			//Query 
+			output := make([]byte, 4)
+			binary.BigEndian.PutUint32(output, uint32(avg))
+			if _, err := conn.Write(output); err != nil {
+				logger.Error(fmt.Sprintf("(%s) %s", err, addr))
+			} else {
+				logger.Info(fmt.Sprintf("query: %v %v ⇒ %v (%v)", first, second, output, addr))
+			}
 		} else {
-			// Undefined
-			continue
+
+			logger.Warn(fmt.Sprintf("Undefined Input for %s to %c", addr, buf[0]))
 		}
 
 	}
@@ -72,44 +83,3 @@ func meansToAnEndHandler(conn net.Conn, logger *slog.Logger) {
 
 }
 
-func meansToAnEnd() {
-	//buffer := []byte{0x49,0x00,0x00,0x30,0x39,0x00,0x00,0x00,0x65}
-	//buffer := []byte{0x51,0x00,0x00,0x03,0xe8,0x00,0x01,0x86,0xa0}
-	//
-	// if len(buffer) != 9 {
-	// 	fmt.Println("Not Enough bytes")
-	// 	return
-	// }
-	// //mode := buffer[0]
-	// part1 := buffer[1:5]
-	// part2 := buffer[5:]
-	// if part1[0] == 1 {
-	// 	fmt.Println("")
-	// }
-	//
-	// if part2[0] == 1 {
-	//
-	// }
-
-	// if mode == 'I' {
-	// 	// Insert
-	// 	timestamp := binary.BigEndian.Uint32(buffer[1:5])
-	// 	value := binary.BigEndian.Uint32(buffer[5:])
-	//
-	// 	fmt.Printf("Insert at %d with value %d", timestamp, value)
-	// } else if mode == 'Q' {
-	// 	// Insert
-	// 	minTime := binary.BigEndian.Uint32(buffer[1:5])
-	// 	maxTime := binary.BigEndian.Uint32(buffer[5:])
-	// 	
-	// 	fmt.Printf("Query between %d and %d", minTime, maxTime)
-	//
-	// 	//Query 
-	// } else {
-	// 	fmt.Printf("Invalid First Byte %c", mode)
-	// 	// Undefined
-	// }
-	
-
-
-}

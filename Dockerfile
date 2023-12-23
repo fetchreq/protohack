@@ -18,4 +18,4 @@ COPY --from=builder /app/protohack .
 
 EXPOSE 10000
 
-CMD ./protohack p1
+CMD ./protohack p3
