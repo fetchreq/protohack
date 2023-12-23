@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"math/big"
 	"net"
-	"os"
 
 	"github.com/rjprice04/protohack/server"
 	"github.com/spf13/cobra"
@@ -25,9 +24,6 @@ var p1Cmd = &cobra.Command{
 		
 		server.MakeTCPServer("Problem 1", primeTimeServerHandler)
 
-		jsonHandler := slog.NewJSONHandler(os.Stderr, nil)
-		myslog := slog.New(jsonHandler)
-		myslog.Info("message")
 	},
 }
 
