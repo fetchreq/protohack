@@ -10,10 +10,35 @@ import (
 	"net"
 	"os"
 	"strings"
-	"time"
 	"unicode"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
+)
+
+const (
+	InvalidName = "Only alphanumeric characters are allowed in names"
+	WelcomeMessageTemplate = "Welcome to budgetchat! What shall I call you?"
+	UserListTemplate = "* This room contains %s"
+	UserEnterTemplate = "* %s has entered the room"
+	UserLeaveTemplate = "* %s has left the room"
+	NewMessageTemplate = "[%s] %s"
+)
+
+type ClientStatus int
+
+const (
+	Joining ClientStatus = iota
+	Joined 
+)
+
+var (
+	// Send a new Subscription to add some one to the chatroom
+	subscribe = make(chan Subscription)
+	// Send a channel here to unsubscribe.
+	unsubscribe = make(chan Subscription)
+	// Send events here to publish them.
+	publish = make(chan ClientEvent)
 )
 
 // p3Cmd represents the p3 command
@@ -36,9 +61,8 @@ var p3Cmd = &cobra.Command{
 		defer listener.Close()
 
 
-		channel := make(chan string)
-
-		go chatroom(myslog)
+		// start the chat room
+		go chatroomController(myslog)
 
 		for {
 			conn, err := listener.Accept()
@@ -47,7 +71,13 @@ var p3Cmd = &cobra.Command{
 				continue
 			}
 
-			go chatRoomHandler(conn, myslog, channel)
+			// Send welcome message
+			msg := []byte(WelcomeMessageTemplate)
+			msg = append(msg, '\n')
+			conn.Write(msg)
+
+			// Add user to the the chat room 
+			go ChatRoomConnection(conn, myslog)
 
 		}
 
@@ -58,65 +88,47 @@ func init() {
 	rootCmd.AddCommand(p3Cmd)
 }
 
-const helloMessage = "Welcome to budgetchat! What shall I call you?"
-type ClientStatus  int
 
-const (
-	Joining ClientStatus = iota
-	Joined 
-)
 
-type EventType  int
-
-const (
-	NewMessage EventType = iota
-	NewUserBroadCast
-	UserList
-	UserLeave
-)
-
-var (
-	// Send a channel here to get room events back.  It will send the entire
-	// archive initially, and then new messages as they come in.
-	subscribe = make(chan Subscription)
-	// Send a channel here to unsubscribe.
-	unsubscribe = make(chan Subscription)
-	// Send events here to publish them.
-	publish = make(chan Event)
-)
-func chatroom (logger *slog.Logger) {
+// The main controller for the chatroom
+func chatroomController(logger *slog.Logger) {
 	cliensts := make(map[Subscription]bool)
 	for {
 		select {
 		case sub := <- subscribe: 
-			logger.Info(fmt.Sprintf("[new user] %s", sub.name))	
-			var nameList strings.Builder
-			for user := range cliensts {
-				nameList.WriteString(fmt.Sprintf("%s, ", user.name))
-			}
+			logger.Info(fmt.Sprintf("[new user] %s", sub.Name))	
 
-			names := nameList.String()
-			names = strings.TrimSuffix(names, ", ")
-			
-			sub.channel <- Event{eventType: UserList, message: names}
-			for user := range cliensts {
+			// Send an event to the new user to show the names of people in the chat
+			userListMsg := fmt.Sprintf(UserListTemplate, GetListOfActiveNames(cliensts))
+			sub.Channel <- userListMsg
 
-				user.channel <- Event{eventType: NewUserBroadCast, message: sub.name}
+			// Sned an event to annouse the new user to everyone else
+			newUserMsg := fmt.Sprintf(UserEnterTemplate, sub.Name)
+			for user := range cliensts {
+				user.Channel <- newUserMsg
 			}
+			// Add the new user
 			cliensts[sub] = true
 
 		case event := <- publish:
+
+			userMessage := fmt.Sprintf(NewMessageTemplate, event.FromUser, event.Message)
+
+			// Sends a message to all other users in the chat room
 			for user := range cliensts {
-				if event.userId != user.id {
-					user.channel <- Event{eventType: NewMessage, message: event.message, name: event.name}
+
+				if event.UserId != user.ID {
+					user.Channel <- userMessage
 				}
 			}
 		case unsub := <- unsubscribe: 
 			delete(cliensts, unsub)	
-			logger.Info(fmt.Sprintf("[user left] %s", unsub.name))	
-			for user := range cliensts {
+			logger.Info(fmt.Sprintf("[user left] %s", unsub.Name))	
 
-				user.channel <- Event{eventType: UserLeave, message: unsub.name}
+			// Announce a user has left
+			userLeftMsg := fmt.Sprintf(UserLeaveTemplate, unsub.Name)
+			for user := range cliensts {
+				user.Channel <- userLeftMsg
 			}
 
 		}
@@ -125,90 +137,92 @@ func chatroom (logger *slog.Logger) {
 	}
 }
 
+// Gets a comma seperated list of users who are in the chat room
+func GetListOfActiveNames(cliensts map[Subscription]bool) string {
+	var nameList strings.Builder
+	for user := range cliensts {
+		nameList.WriteString(fmt.Sprintf("%s, ", user.Name))
+	}
+
+	return strings.TrimSuffix(nameList.String(), ", ")
+}
+
 type Subscription struct {
-	id string
-	name string
-	channel chan Event 
+	ID uuid.UUID
+	Name string
+	Channel chan string
 }
 
-type Event struct {
-	userId string
-	name string
-	eventType EventType
-	message string
+type ClientEvent struct {
+	UserId uuid.UUID
+	FromUser string
+	Message string
 }
 
-func chatRoomHandler(conn net.Conn, logger *slog.Logger, channel chan string) {
+
+func ChatRoomConnection(conn net.Conn, logger *slog.Logger) {
 	var user Subscription
 	defer conn.Close()
-	msg := []byte(helloMessage)
-	msg = append(msg, '\n')
-	conn.Write(msg)
 	
-	c := make(chan Event)
+	userChannel := make(chan string)
 	scanner := bufio.NewScanner(conn)
 	status := Joining
+
 	for scanner.Scan() {
 		buffer := scanner.Bytes()
 		
 		msg := string(buffer)
 		if status == Joining {
-			allowed := true
-			for _, letter := range msg {
-				if !unicode.IsLetter(letter) && !unicode.IsDigit(letter) && letter != '\n' {
-					allowed = false	
-				}
-			}
-			if len(strings.TrimSpace(msg)) == 0 || len(msg) < 1 || !allowed {
+			if IsNameNotAllowed(msg) {
+				output := []byte(InvalidName)
+				output = append(output, '\n')
+				conn.Write(output)
 				break
 			}
 
-			user = Subscription{id: fmt.Sprintf("%s_%s_%s", time.Nanosecond.String(), conn.RemoteAddr(), conn.RemoteAddr().Network()), name: msg, channel: c }
-			go messageHandler(c, conn)
+			id := uuid.New()
+			user = Subscription{ID: id, Name: msg, Channel: userChannel }
+
+			// Add new user to chat room
 			subscribe <- user
+
+			// Start listening for events from the server 
+			go UserEventPublisher(userChannel, conn)
+
 			status = Joined
+
 		} else if status == Joined {
-			publish <- Event{userId: user.id, name: user.name, message: msg}
+			publish <- ClientEvent{UserId: user.ID, FromUser: user.Name, Message: msg}
 
 		}
 		
 	}
 	
 	if status == Joined {
+		// Publish a user has left only if they finished joining
 		unsubscribe <- user
 	}
 
 }
-const (
-	UserListTemplate = "* This room contains %s"
-	UserEnterTemplate = "* %s has entered the room"
-	UserLeaveTemplate = "* %s has left the room"
-	NewMessageTemplate = "[%s] %s"
-)
 
-func messageHandler(c chan Event, conn net.Conn) {
-	for {
-		select {
-		case event := <- c:
-			var message string
-			if event.eventType == UserList {
-				message = fmt.Sprintf(UserListTemplate, event.message)
-
-			} else if event.eventType == NewUserBroadCast {
-				message = fmt.Sprintf(UserEnterTemplate, event.message)
-
-			} else if event.eventType == UserLeave {
-				message = fmt.Sprintf(UserLeaveTemplate, event.message)
-
-			} else if event.eventType == NewMessage {
-				message = fmt.Sprintf(NewMessageTemplate, event.name, event.message)
-
-			}
-
-			output := []byte(message)
-			output = append(output, '\n')
-			conn.Write(output)
-
+// Checks if a name is not allowed, allowed names are only able to have alphanumeric characters
+func IsNameNotAllowed(name string) bool {
+	disallowed := false 
+	for _, letter := range name {
+		if !unicode.IsLetter(letter) && !unicode.IsDigit(letter) && letter != '\n' {
+			disallowed = true
 		}
+	}
+	return len(strings.TrimSpace(name)) == 0 || len(name) < 1 || disallowed
+}
+
+// Listens to events from the controller to be published to a user
+func UserEventPublisher(channel chan string, conn net.Conn) {
+	for {
+		message := <- channel
+		output := []byte(message)
+		output = append(output, '\n')
+		conn.Write(output)
+
 	}
 }

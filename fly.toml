@@ -14,3 +14,10 @@ primary_region = "ord"
   
   [[services.ports]]
     port = 10000
+
+[[services]]
+  internal_port = 10000
+  protocol = "udp"
+  
+  [[services.ports]]
+    port = 10000
